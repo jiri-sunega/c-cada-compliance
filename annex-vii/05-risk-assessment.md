@@ -208,26 +208,27 @@ every POST/PUT/PATCH/DELETE after the pipeline completes, capturing the
 actual HTTP response status code, so a 401/403 denial is preserved as an
 audit entry, not only successful writes. Precisely stated: the middleware
 enqueues entries asynchronously (best-effort): under channel saturation
-entries are dropped with a logged warning. **Exception:** requests under
-`/connect/` (OAuth token endpoints) are skipped by the middleware and have
-no fallback logging — failed authentication attempts at `/connect/token`
-produce no `security.audit_log` entry.
+entries are dropped with a logged warning. **`/connect/` division of labor:**
+the middleware still skips requests under `/connect/` outright, for
+request-body capture safety (the OAuth form body carries credentials it must
+never see) — but the token endpoint is not left unaudited. `AuthorizationController`
+calls `AuthenticationAuditor` (`Cicada.Security.Application.Services`) directly
+around each grant-handling branch, enqueueing to the same `security.audit_log`
+table: failures carry a `reason` — `unknown_user` / `invalid_password` /
+`locked_out` / `invalid_refresh_token` — and successes carry the resolved
+user identity. The auditor's signatures accept only identifiers, never
+password or token material, so the credential-safety property the
+middleware exclusion exists for is preserved by construction.
 
 **Residual risk:** Stated precisely rather than rounded up to full coverage:
 
-1. **Failed authentication attempts at `/connect/token` are not audit-logged.**
-   `AuditLoggingMiddleware` excludes requests under `/connect/` (the OAuth
-   endpoints) before recording; the `/connect/token` handler has no fallback
-   logging. As a result, unauthorised-access attempts at the token endpoint
-   produce no `security.audit_log` entry. Owning item: untracked — new finding
-   (this assessment).
-2. **Read-request denials are not audit-logged.** `AuditLoggingMiddleware`
+1. **Read-request denials are not audit-logged.** `AuditLoggingMiddleware`
    audits only state-changing methods (POST/PUT/PATCH/DELETE); a denied GET
    or a denied streaming read (read-egress, ADR-0071) produces no
    `security.audit_log` entry. This is the same underlying logging-coverage
    gap named under `§AI-I-2l`. Owning item: Testing Strategy (dashboard §4
    queue).
-3. No push notification exists for authorization-state changes (no
+2. No push notification exists for authorization-state changes (no
    `HubAuthzNotifier`/`authzChanged` mechanism) — a connected client's
    effective permissions can go stale until its next request or reconnect.
    Owning item: Layout Designer epic carry-forward (dashboard §4).
@@ -405,7 +406,9 @@ detection after the fact.
 
 **Implemented controls:** The `security.audit_log` table (`AuditLoggingMiddleware`,
 recording user, endpoint, action, and response status code for every
-state-changing request outside the excluded `/connect/` OAuth paths — see
+state-changing request outside the `/connect/` OAuth paths — which the
+middleware still excludes for request-body capture safety, but which now
+carry their own dedicated audit path via `AuthenticationAuditor` — see
 `§AI-I-2d`) together with structured application logs record
 modification of data, services, and functions.
 
@@ -457,7 +460,7 @@ table with its owning tracked item:
 | No automatic update install/notification inside the product; external channel only | `§AI-I-2c` | Deliberate design choice (ADR-0139); in-product notification recorded here as a new, currently-untracked residual |
 | No anti-rollback protection on signed updates | `§AI-I-2c` | Accepted consequence of ADR-0139 |
 | Read-request denials are not audit-logged (`security.audit_log` covers only POST/PUT/PATCH/DELETE) | `§AI-I-2d`, `§AI-I-2l` | Testing Strategy (dashboard §4 queue) |
-| Failed authentication attempts against `/connect/token` are not audit-logged (`AuditLoggingMiddleware` excludes `/connect/` paths; no fallback logging in token handler) | `§AI-I-2d` | Untracked — new finding (this assessment) |
+| Failed authentication attempts against `/connect/token` are not audit-logged (`AuditLoggingMiddleware` excludes `/connect/` paths; no fallback logging in token handler) | `§AI-I-2d` | Resolved 2026-07-05 — `AuthenticationAuditor` (this commit) |
 | No `HubAuthzNotifier`/`authzChanged` push on permission change | `§AI-I-2d` | Layout Designer epic carry-forward (dashboard §4) |
 | No application-layer encryption at rest | `§AI-I-2e` | Justified deployment-guidance item (`02-user-information.md §II.8(a)`) — not a tracked queue item |
 | No general API/OPC UA-southbound rate limiting or DoS hardening | `§AI-I-2h` | **Untracked** — no existing dashboard §4 or `BRAINSTORM-BACKLOG.md` item found; recorded here as new |

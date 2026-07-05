@@ -113,6 +113,17 @@ project's role model is authoring-only and bundle-authoritative — the
 runtime itself only ever edits user→role assignments, never
 role→permission mappings (ADR-0067, ADR-0068).
 
+Audit trail coverage for this chain splits across two purpose-built paths
+rather than one: `AuditLoggingMiddleware` records generic state-changing
+REST requests, but skips everything under `/connect/` outright for
+request-body capture safety, since the OAuth form body there carries
+credentials the middleware must never see. The `/connect/token` endpoint —
+where authentication itself happens — is instead audited directly by
+`AuthorizationController` through `AuthenticationAuditor`, a dedicated,
+credential-free path (identifiers and a failure reason only, never
+password/token material) that enqueues to the same `security.audit_log`
+table (`05-risk-assessment.md §AI-I-2d`).
+
 ## Browser security controls
 
 Both authoring and runtime ship a strict, nonce-based Content-Security-Policy
