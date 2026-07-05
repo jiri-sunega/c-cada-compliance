@@ -170,8 +170,21 @@ each clause below gets its own verdict rather than one blended answer.
   operator action by design, not an automatic one (ADR-0139). A documented
   opt-out mechanism is therefore not applicable — there is no automatic
   default to opt out of (`02-user-information.md §II.8(e)`).
-- **Update notification:** Applicable, via GitHub Releases and GHSA
-  advisories rather than an in-product mechanism.
+- **Update notification:** Applicable — now via an in-product mechanism
+  (resolved 2026-07-05). An opt-in, off-by-default, send-nothing banner
+  (`UpdateBannerComponent`, mounted in both the authoring and runtime shells)
+  surfaces update availability inside the running product once an operator
+  has enabled it (`Updates:Enabled`, off by default); the backend
+  `IUpdateCheckService` polls the public release feed and compares it to
+  the running version, carrying only version/advisory metadata — no code,
+  no signature. **Deployment framing:** a typical on-premise site runs the
+  runtime product, so the runtime banner is the common case; the authoring
+  host and compiler CLI normally remain with the vendor (koworx) and are
+  notified on-prem only under the on-prem authoring license option —
+  otherwise they are updated at the vendor, where this in-product mechanism
+  does not apply. Disabled (the default) and air-gapped deployments make no
+  network call and continue to rely honestly on the external channel
+  (GitHub Releases and GHSA advisories).
 
 **Threats addressed:** Tampering (unpatched or maliciously substituted
 updates) and, for the automatic-installation clause specifically,
@@ -179,15 +192,18 @@ denial of service via an update interrupting a running industrial process.
 
 **Implemented controls:** `cicada verify-release` (or the openssl-only
 independent path in `SECURITY.md`) verifies the signed manifest before
-install; GHSA advisories and GitHub Release notes serve as the notification
-channel (ADR-0139; `04-vulnerability-handling.md §AI-II-7`).
+install; the in-product `UpdateBannerComponent` (both shells) plus the backend
+`IUpdateCheckService` (`GET /api/v1/update-status`) surface update
+availability when the operator has opted in; GHSA advisories and GitHub
+Release notes remain the notification channel for disabled and air-gapped
+deployments (ADR-0139; `04-vulnerability-handling.md §AI-II-7`).
 
-**Residual risk:** No in-product update-notification mechanism exists —
-operators must watch GitHub Releases/GHSA externally rather than being
-notified inside the running product. Owning item: none currently tracked in
-the dashboard §4 queue or `BRAINSTORM-BACKLOG.md`; recorded here as a new,
-currently-untracked residual (candidate for a future queue item, not yet
-minted).
+**Residual risk:** The in-product notification gap is resolved (2026-07-05)
+— see the residual-index split below. Automatic installation remains a
+deliberate non-applicable design choice (ADR-0139), not a residual to
+close. No anti-rollback protection on signed updates remains a separate,
+unrelated residual under this same paragraph — tracked in the residual
+index, unaffected by this change.
 
 ## AI-I-2d — Protection from unauthorised access
 
@@ -499,7 +515,8 @@ table with its owning tracked item:
 |---|---|---|
 | Scan gate report-only, not enforcing (~30 pre-existing findings) | `§AI-I-2a` | CRA Sub-project B triage carry-forward (dashboard §4) |
 | CSP default is `ReportOnly`; enforce-mode flip is an operator step | `§AI-I-2b` | Documented commissioning instruction (`02-user-information.md §II.8(a)`) — not a tracked queue item |
-| No automatic update install/notification inside the product; external channel only | `§AI-I-2c` | Deliberate design choice (ADR-0139); in-product notification recorded here as a new, currently-untracked residual |
+| No automatic update install inside the product; an operator-driven install remains by design | `§AI-I-2c` | Deliberate design choice (ADR-0139) — not a tracked queue item |
+| No in-product update notification; external channel only | `§AI-I-2c` | Resolved 2026-07-05 — opt-in `UpdateBannerComponent` (both shells) + backend `IUpdateCheckService` (this commit) |
 | No anti-rollback protection on signed updates | `§AI-I-2c` | Accepted consequence of ADR-0139 |
 | Read-request denials are not audit-logged (`security.audit_log` covers only POST/PUT/PATCH/DELETE) | `§AI-I-2d`, `§AI-I-2l` | Testing Strategy (dashboard §4 queue) |
 | Failed authentication attempts against `/connect/token` are not audit-logged (`AuditLoggingMiddleware` excludes `/connect/` paths; no fallback logging in token handler) | `§AI-I-2d` | Resolved 2026-07-05 — `AuthenticationAuditor` (this commit) |
