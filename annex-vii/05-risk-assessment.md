@@ -62,7 +62,7 @@ language follows `03-design-and-development.md`'s architecture description.
 | Asset | Trust boundary | Attack surface | Primary threats (STRIDE) | Governing controls |
 |---|---|---|---|---|
 | Runtime API + hubs | Authenticated operator session ↔ API process | REST endpoints, `StateHub` streaming | Elevation of privilege | Operator RBAC + per-user read-egress gating (ADR-0067–ADR-0071) |
-| OPC UA southbound connectivity | Runtime host ↔ field device network | Outbound OPC UA client connections | Spoofing, Denial of service | Device-authority IP/FQDN allow-listing plus an mTLS client-certificate facet (ADR-0107, ADR-0108); availability against DoS pressure is a noted residual — see `§AI-I-2h` |
+| OPC UA southbound connectivity | Runtime host ↔ field device network | Outbound OPC UA client connections | Spoofing, Denial of service | Device-authority IP/FQDN allow-listing plus an mTLS client-certificate facet (ADR-0107, ADR-0108); a per-connector monitored-item ceiling and notification-rate shed cap DoS pressure from this connection — see `§AI-I-2h` |
 | Update channel | Operator ↔ downloaded release archive | `cicada verify-release`, manual install steps | Tampering, Rollback | Ed25519-signed release manifest, explicit asset enumeration (ADR-0139); no anti-rollback protection is an accepted consequence of that same decision — see `§AI-I-2c` |
 | Unified state bus egress | Authorized user session ↔ connected browser | `StateClientService.resolve()` streamed values | Information disclosure | Compile-time usage-driven exposure gating (`exposeToFrontend`, ADR-0086) composed with per-user read-egress authorization (ADR-0084, ADR-0085) |
 
@@ -302,28 +302,63 @@ Requirement (paraphrase): products must protect the availability of
 essential and basic functions, including after an incident, through
 resilience and mitigation measures against denial-of-service attacks.
 
-**Applicability:** Applicable, with residuals.
+**Applicability:** Applicable.
 
 **Threats addressed:** Denial of service.
 
 **Implemented controls:** On-premises network isolation (assumed segmented
-plant networks, `02-user-information.md §II.5`) is the primary availability
-control; device authority limits which clients may reach runtime device
-connections at all (ADR-0107, ADR-0108); a per-IP rate limit on the OAuth
-token endpoint (`POST /connect/token`) mitigates credential-stuffing/basic
-DoS pressure specifically against that endpoint (ADR-0135).
+plant networks, `02-user-information.md §II.5`) remains the primary
+availability control; device authority limits which clients may reach
+runtime device connections at all (ADR-0107, ADR-0108). On top of that,
+DoS-hardening (2026-07-05) bounds resource exhaustion at each of the
+runtime's externally-reachable surfaces:
 
-**Residual risk:** Two residuals, stated honestly rather than rounded up:
+- **API surface:** a per-IP rate limit on the OAuth token endpoint
+  (`POST /connect/token`, ADR-0135) plus a global, per-user rate limit
+  applied to every `/api/v1` endpoint
+  (`RuntimeDosOptions.ApiRequestsPerMinutePerUser`, default 300/minute,
+  fixed-window, partitioned by authenticated identity with an IP fallback
+  for anonymous callers).
+- **SignalR hub surface:** a maximum inbound message size
+  (`RuntimeDosOptions.HubMaxReceiveMessageBytes`) and a per-connection
+  live-subscription ceiling (`SubscriptionCapGuard`) on `StateHub`; the
+  ceiling clamps rather than throws, so a connection at its limit keeps the
+  subscriptions it already holds.
+- **OPC UA southbound connectivity:** a per-connector monitored-item
+  ceiling (`OpcUaConnectorOptions.MaxMonitoredItemsPerConnector`, default
+  10,000; enforced via the pure `MonitoredItemAdmission.Admit` helper)
+  refuses to create monitored items beyond the ceiling — a malformed bundle
+  or a device advertising an unexpectedly large address space cannot make
+  one connector create unbounded subscriptions — and a per-connector
+  notification-rate shed (`NotificationRateLimiter`, `MaxNotificationsPerSecond`,
+  default 50,000/second) drops excess inbound data-change notifications
+  rather than letting a flooding or faulty device starve the runtime's
+  processing.
 
-1. **No general API/OPC UA-southbound rate limiting or DoS hardening.**
-   ADR-0135's rate limit is scoped to the single OAuth token endpoint; it
-   does not cover the runtime's broader REST/hub surface or OPC UA southbound
-   connection handling. Checking the dashboard §4 queue and
-   `BRAINSTORM-BACKLOG.md` for an existing tracked item (searched for
-   "rate limit" and "DoS") found none — **this is currently untracked**.
-   Recorded here as a new residual pending a queue item.
-2. **No high-availability / multi-node failover.** Owning item: Multi-node
-   cooperative deployment, Sessions D–F (dashboard §4 queue).
+All three are availability-first by construction (design D-3): the
+affected connector, hub connection, or API caller stays exactly as
+connected as it was before — a capped OPC UA connector never transitions
+to `Faulted` and is never disconnected, it just keeps the items/rate it
+could stay within bounds on. Capping is loud rather than silent: throttled
+`Console.Error` warnings (logged only at power-of-two drop counts, so the
+warning itself cannot become a flood), cumulative diagnostic counters
+(`SkippedMonitoredItemCount`, `DroppedNotificationCount`), and a
+`Degraded` — not `Unhealthy` — result from `ConnectorsHealthCheck` once
+either counter goes nonzero for an otherwise-`Connected` connector.
+
+None of this replaces the OPC UA client's baseline resilience, which
+pre-existed this hardening pass and is unchanged by it: exponential-backoff
+reconnection (`OpcUaConnectorOptions.ReconnectBaseDelay`/`ReconnectMaxDelay`),
+a per-monitored-item server-side queue (`QueueSize = 1`,
+`DiscardOldest = true`), and a per-subscription publish cap
+(`MaxNotificationsPerPublish = 1000`) were already in place; the new
+ceiling and shed are additive bounds on top of that existing machinery, not
+a replacement for it.
+
+**Residual risk:** No high-availability / multi-node failover exists — a
+single runtime host is still a single point of failure no matter how well
+it protects itself against resource exhaustion. Owning item: Multi-node
+cooperative deployment, Sessions D–F (dashboard §4 queue).
 
 ## AI-I-2i — Minimise negative impact on other devices or networks
 
@@ -337,14 +372,21 @@ services provided by other devices or networks.
 
 **Implemented controls:** OPC UA southbound connections are client-initiated
 by the runtime toward field devices under device-authority gating, with no
-amplification-style surfaces; both products' SPAs are served same-origin
+amplification-style surfaces; the runtime's own polling load against each
+field device is itself bounded and operator-configurable — sampling and
+publishing intervals (`OpcUaConnectorOptions.DefaultSamplingInterval`,
+default 500ms; `DefaultPublishingInterval`, default 1000ms; both
+overridable per tag mapping) cap how aggressively the runtime reads from a
+given device, so the runtime cannot itself become a DoS source against the
+devices it connects to. Both products' SPAs are also served same-origin
 from their own API binary rather than pulling third-party CDN content
 (Control 3, ADR-0120), so there is no outbound load imposed on third-party
 infrastructure as a side effect of normal operation.
 
-**Residual risk:** None named beyond `§AI-I-2h`'s general DoS-hardening
-residual, which is the same underlying gap viewed from the opposite
-direction.
+**Residual risk:** None named beyond `§AI-I-2h`'s remaining high-availability
+/ multi-node-failover residual, which applies here too: a runtime host that
+goes down under load stops protecting other devices/networks from whatever
+it was mediating, just as it stops serving its own functions.
 
 ## AI-I-2j — Limit attack surfaces, including external interfaces
 
@@ -463,7 +505,7 @@ table with its owning tracked item:
 | Failed authentication attempts against `/connect/token` are not audit-logged (`AuditLoggingMiddleware` excludes `/connect/` paths; no fallback logging in token handler) | `§AI-I-2d` | Resolved 2026-07-05 — `AuthenticationAuditor` (this commit) |
 | No `HubAuthzNotifier`/`authzChanged` push on permission change | `§AI-I-2d` | Layout Designer epic carry-forward (dashboard §4) |
 | No application-layer encryption at rest | `§AI-I-2e` | Justified deployment-guidance item (`02-user-information.md §II.8(a)`) — not a tracked queue item |
-| No general API/OPC UA-southbound rate limiting or DoS hardening | `§AI-I-2h` | **Untracked** — no existing dashboard §4 or `BRAINSTORM-BACKLOG.md` item found; recorded here as new |
+| No general API/OPC UA-southbound rate limiting or DoS hardening | `§AI-I-2h` | Resolved 2026-07-05 — global per-user API rate limit + SignalR hub caps + OPC UA monitored-item ceiling/notification-rate shed (this commit) |
 | No high-availability / multi-node failover | `§AI-I-2h`, `§AI-I-2i` | Multi-node cooperative deployment, Sessions D–F (dashboard §4 queue) |
 | No backend `AssemblyLoadContext` isolation for third-party backend contributions | `§AI-I-2k` | `package-distribution-and-trust.md` §"Known gaps and deferred hooks" |
 | No user-facing logging opt-out | `§AI-I-2l` | Justified design choice — not a tracked queue item |

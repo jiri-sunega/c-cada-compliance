@@ -143,6 +143,24 @@ client's mTLS certificate (`CookieMtls` mode) — both modes default off,
 byte-for-byte identical to the pre-hardening behavior unless an operator
 opts in (ADR-0122, ADR-0123, ADR-0124).
 
+## Availability and DoS-hardening bounds
+
+The runtime's externally-reachable surfaces are each bounded against
+resource exhaustion rather than left open-ended: a global per-user rate
+limit on every `/api/v1` endpoint, a SignalR inbound message-size cap and
+per-connection live-subscription ceiling on `StateHub`, and, southbound, a
+per-connector OPC UA monitored-item ceiling paired with a notification-rate
+shed that drops excess inbound data-change traffic. All three are
+availability-first by construction: each clamps or sheds the excess rather
+than tearing down the connection or bundle it is protecting, so a capped
+API caller, a capped hub connection, and a capped OPC UA connector all stay
+usable on whatever fits within bounds. This is additive to the OPC UA
+client's pre-existing baseline resilience (exponential-backoff reconnect,
+a per-item server-side queue, a per-subscription publish cap), which this
+pass leaves unchanged. Full detail, defaults, and the honest scope of what
+remains open (multi-node failover) live in
+`05-risk-assessment.md §AI-I-2h`.
+
 ## Signed platform updates
 
 Platform updates ship as signed release artifacts: each `v*` release carries
