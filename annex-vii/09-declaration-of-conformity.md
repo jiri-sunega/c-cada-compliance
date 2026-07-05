@@ -35,8 +35,9 @@ lines 2771–2899, regulation text as published, OJ L, 2024/2847, 20.11.2024):
   FPGAs with security-related functionality; smart-home general-purpose
   virtual assistants; smart-home products with security functionality (door
   locks, security cameras, baby monitoring systems, alarm systems);
-  internet-connected toys with social-interactive or location-tracking
-  features; personal health-monitoring wearables (outside Regulation (EU)
+  internet-connected toys covered by Directive 2009/48/EC with
+  social-interactive or location-tracking features; personal
+  health-monitoring wearables (outside Regulation (EU)
   2017/745 or 2017/746) or wearables intended for children.
 - **Annex III Class II**: hypervisors and container runtime systems; firewalls
   and intrusion detection/prevention systems; tamper-resistant
@@ -94,14 +95,30 @@ of the route to be followed, not a conformity assertion.
 
 ## Article 32(5) fallback (free and open-source software)
 
-C-CADA qualifies as free and open-source software under the Art. 3(48)
-definition — source code openly shared, licensed (AGPL-3.0-only, the SPDX
-canonical per ADR-0137) under terms granting all rights to freely access,
-use, modify, and redistribute it
+C-CADA is licensed AGPL-3.0-only (the SPDX canonical per ADR-0137), and
+source code is provided to every recipient of the software under the terms
+of that license — the grant to freely access, use, modify, and redistribute
+required by Art. 3(48)
 (`c-cada-knowledge/sources/archive/SRC-eu-cra-regulation-2024-2847/extracted.md`
 line 895). koworx.net's parallel commercial license does not remove that
-qualification: the AGPL-3.0-only grant made to recipients independently
-satisfies Art. 3(48) regardless of what other license is also offered.
+grant: the AGPL-3.0-only terms made to recipients apply regardless of what
+other license is also offered.
+
+**Honest uncertainty.** Art. 3(48) also requires the software's source code
+to be "openly shared" — a term the archived text does not define further.
+C-CADA's distribution posture is delivery to customers under the license,
+not unrestricted public publication of the source repository (the source
+repository itself is private; only the compliance dossier and signed DoCs
+are mirrored publicly, `00-overview.md`). Whether contractual delivery
+under AGPL-3.0-only to each recipient satisfies "openly shared," or whether
+that phrase contemplates something closer to a public repository, is not
+settled by the text this dossier has access to; this section therefore
+records the FOSS qualification as a considered position, not a settled
+fact. That uncertainty does not weaken this chapter's conclusion: as the
+paragraph below restates, Art. 32(5) is recorded as insurance only, and the
+primary route this chapter follows — C-CADA unlisted under Annex III/IV,
+therefore module A under Art. 32(1) — does not depend on the FOSS
+qualification being correct.
 
 That same dual licensing is what brings C-CADA within the CRA's scope at
 all. Recital 18 draws the scope line at monetization: FOSS that a
@@ -110,8 +127,8 @@ commercial activity" and so is not "making available on the market"
 (Art. 3(22)); FOSS that is monetized is (recital 18, same source, line 123).
 C-CADA is monetized via its commercial license, so the CRA applies to it
 despite its FOSS status. This has been the workstream's working premise
-since it was chartered — ADR-0125 decomposed the CRA workstream into six
-sub-projects on that premise — and this chapter is the first place the
+since it was chartered — ADR-0125 decomposed the CRA workstream into
+sub-projects A–E on that premise — and this chapter is the first place the
 premise is checked directly against the regulation text rather than asserted
 informally.
 
@@ -127,7 +144,7 @@ available under Art. 32(5) even on a contested Annex III Class I reading of
 the identity/access-management hook above. Both readings — "not listed" and
 "listed but FOSS-published" — converge on module A; Art. 32(5) is recorded
 here as insurance, not as this chapter's primary basis for the route
-(decision recorded in the sub-project E ADR).
+(decision recorded in ADR-0141).
 
 ## CE marking
 
@@ -152,8 +169,8 @@ accompany this dossier:
 - `docs/compliance/doc/EU-DoC-c-cada-authoring.md`
 - `docs/compliance/doc/EU-DoC-c-cada-runtime.md`
 
-(created by Task 2; both remain **drafts** until signed, dated, and
-published at go-live.) `c-cada-marketplace` (registry) does not get a DoC:
+Both remain **drafts** until signed, dated, and published at go-live.
+`c-cada-marketplace` (registry) does not get a DoC:
 per ADR-0139 C-6, the registry is koworx-hosted and never placed on the
 market ("beneficial to have it fully under our control"); it keeps its
 product SBOM per ADR-0128/0129 and rejoins the manifest only if an
